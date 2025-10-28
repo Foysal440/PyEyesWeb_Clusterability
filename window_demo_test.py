@@ -70,7 +70,7 @@ def validate_numeric(value, name, min_val=None, max_val=None):
     return float(value)
 
 
-from Clusterability import Clusterability, assess_clusterability
+from clusterability import Clusterability, assess_clusterability
 
 
 def demo_window_analysis():

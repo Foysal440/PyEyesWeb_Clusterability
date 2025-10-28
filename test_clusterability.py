@@ -72,7 +72,7 @@ def validate_numeric(value, name, min_val=None, max_val=None):
 
 
 # Import the module to test
-from Clusterability import Clusterability, assess_clusterability
+from clusterability import Clusterability, assess_clusterability
 
 
 class TestClusterability:
