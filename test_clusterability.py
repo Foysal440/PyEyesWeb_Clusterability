@@ -10,69 +10,28 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Mock dependencies
 class SlidingWindow:
-    def __init__(self, max_length: int, n_columns: int):
-        self.max_length = max_length
+    def __init__(self, window_size: int, n_columns: int):
+        self.window_size = window_size
         self.n_columns = n_columns
-        self._n_columns = n_columns  # Add this line to fix the error
+        self._n_columns = n_columns
         self.buffer = []
 
-    def append(self, data_point):
+    def add(self, data_point):
         if len(data_point) != self.n_columns:
             raise ValueError(f"Expected {self.n_columns} columns, got {len(data_point)}")
         self.buffer.append(data_point)
-        if len(self.buffer) > self.max_length:
+        if len(self.buffer) > self.window_size:
             self.buffer.pop(0)
 
     def is_full(self):
-        return len(self.buffer) >= self.max_length
+        return len(self.buffer) >= self.window_size
 
     def to_array(self):
         return np.array(self.buffer), None
 
 
-class ThreadSafeHistoryBuffer:
-    def __init__(self, maxlen: int = 100):
-        self.buffer = []
-        self.maxlen = maxlen
-
-    def append(self, value):
-        self.buffer.append(value)
-        if len(self.buffer) > self.maxlen:
-            self.buffer.pop(0)
-
-    def get_all(self):
-        return self.buffer.copy()
-
-    def clear(self):
-        self.buffer.clear()
-
-
-def validate_integer(value, name, min_val=None, max_val=None):
-    if not isinstance(value, int):
-        raise TypeError(f"{name} must be integer")
-    if min_val is not None and value < min_val:
-        raise ValueError(f"{name} must be >= {min_val}")
-    if max_val is not None and value > max_val:
-        raise ValueError(f"{name} must be <= {max_val}")
-    return value
-
-def validate_boolean(value, name):
-    if not isinstance(value, bool):
-        raise TypeError(f"{name} must be boolean")
-    return value
-
-def validate_numeric(value, name, min_val=None, max_val=None):
-    if not isinstance(value, (int, float)):
-        raise TypeError(f"{name} must be numeric")
-    if min_val is not None and value < min_val:
-        raise ValueError(f"{name} must be >= {min_val}")
-    if max_val is not None and value > max_val:
-        raise ValueError(f"{name} must be <= {max_val}")
-    return float(value)
-
-
 # Import the module to test
-from clusterability import Clusterability, assess_clusterability
+from clusterability import Clusterability
 
 
 class TestClusterability:
@@ -80,25 +39,25 @@ class TestClusterability:
 
     def test_initialization(self):
         """Test Clusterability initialization."""
-        analyzer = Clusterability()
-        assert analyzer.sample_fraction == 0.1
-        assert analyzer.output_interpretation == True
+        analyzer = Clusterability(n_neighbors=5)
+        assert analyzer.n_neighbors == 5
+        assert analyzer.random_state is None
 
-        analyzer = Clusterability(sensitivity=50, output_interpretation=False, sample_fraction=0.2)
-        assert analyzer.sample_fraction == 0.2
-        assert analyzer.output_interpretation == False
+        analyzer = Clusterability(n_neighbors=10, random_state=42)
+        assert analyzer.n_neighbors == 10
+        assert analyzer.random_state == 42
 
     def test_invalid_parameters(self):
         """Test invalid parameter handling."""
-        with pytest.raises(ValueError):
-            Clusterability(sensitivity=0)
+        with pytest.raises(TypeError):
+            Clusterability(n_neighbors=5, random_state="invalid")
 
         with pytest.raises(ValueError):
-            Clusterability(sample_fraction=1.5)
+            Clusterability(n_neighbors=5, random_state=-1)
 
     def test_hopkins_computation(self):
         """Test Hopkins statistic computation."""
-        analyzer = Clusterability(random_state=42)
+        analyzer = Clusterability(n_neighbors=5, random_state=42)
 
         # Test with clustered data
         cluster1 = np.random.normal(0, 0.5, (50, 2))
@@ -113,55 +72,99 @@ class TestClusterability:
         hopkins = analyzer.compute_hopkins_statistic(random_data)
         assert 0.3 <= hopkins <= 0.7  # Should be around 0.5 for random data
 
-    def test_interpretation(self):
-        """Test Hopkins statistic interpretation."""
-        analyzer = Clusterability()
+    def test_small_samples(self):
+        """Test with small sample sizes."""
+        analyzer = Clusterability(n_neighbors=2, random_state=42)
 
-        assert analyzer.interpret_hopkins_statistic(0.85) == "STRONG CLUSTERING"
-        assert analyzer.interpret_hopkins_statistic(0.68) == "MODERATE CLUSTERING"
-        assert analyzer.interpret_hopkins_statistic(0.55) == "WEAK CLUSTERING"
-        assert analyzer.interpret_hopkins_statistic(0.45) == "RANDOM DISTRIBUTION"
-        assert analyzer.interpret_hopkins_statistic(0.25) == "UNIFORM DISTRIBUTION"
+        # Test with 2 samples
+        small_data = np.random.randn(2, 2)
+        hopkins = analyzer.compute_hopkins_statistic(small_data)
+        assert not np.isnan(hopkins)  # Should compute even with 2 samples
+
+        # Test with 3 samples
+        small_data = np.random.randn(3, 2)
+        hopkins = analyzer.compute_hopkins_statistic(small_data)
+        assert not np.isnan(hopkins)
+
+    def test_edge_cases(self):
+        """Test edge cases."""
+        analyzer = Clusterability(n_neighbors=5)
+
+        # Test with 1 sample (should return nan)
+        single_sample = np.random.randn(1, 2)
+        hopkins = analyzer.compute_hopkins_statistic(single_sample)
+        assert np.isnan(hopkins)
+
+        # Test with 0 samples (should return nan)
+        empty_data = np.random.randn(0, 2)
+        hopkins = analyzer.compute_hopkins_statistic(empty_data)
+        assert np.isnan(hopkins)
+
+        # Test with invalid data dimensions
+        with pytest.raises(ValueError):
+            analyzer.compute_hopkins_statistic(np.array([1, 2, 3]))  # 1D array
 
     def test_sliding_window_integration(self):
         """Test integration with SlidingWindow."""
-        analyzer = Clusterability(random_state=42)
-        window = SlidingWindow(max_length=50, n_columns=2)
+        analyzer = Clusterability(n_neighbors=5, random_state=42)
+        window = SlidingWindow(window_size=50, n_columns=2)
 
         # Fill window with data
         for i in range(50):
-            window.append([np.random.normal(0, 1), np.random.normal(0, 1)])
+            window.add([np.random.normal(0, 1), np.random.normal(0, 1)])
 
         result = analyzer.compute_clusterability(window)
         assert 'hopkins_statistic' in result
-        assert 'interpretation' in result
+        assert 'sample_size' in result
+        assert 'feature_dimension' in result
         assert not np.isnan(result['hopkins_statistic'])
+        assert result['sample_size'] == 50
+        assert result['feature_dimension'] == 2
 
-    def test_assess_clusterability_function(self):
-        """Test the convenience function."""
-        data = np.random.normal(0, 1, (100, 3))
-        result = assess_clusterability(data, random_state=42)
+    def test_sliding_window_not_full(self):
+        """Test with non-full sliding window."""
+        analyzer = Clusterability(n_neighbors=5)
+        window = SlidingWindow(window_size=50, n_columns=2)
 
+        # Add only 10 samples to window
+        for i in range(10):
+            window.add([np.random.normal(0, 1), np.random.normal(0, 1)])
+
+        result = analyzer.compute_clusterability(window)
+        assert np.isnan(result['hopkins_statistic'])
+        assert result['sample_size'] == 0
+
+    def test_call_method(self):
+        """Test the __call__ method."""
+        analyzer = Clusterability(n_neighbors=5, random_state=42)
+        window = SlidingWindow(window_size=30, n_columns=3)
+
+        # Fill window with data
+        for i in range(30):
+            window.add([np.random.normal(0, 1), np.random.normal(0, 1), np.random.normal(0, 1)])
+
+        result = analyzer(window)
         assert 'hopkins_statistic' in result
-        assert 'interpretation' in result
         assert 'sample_size' in result
         assert 'feature_dimension' in result
         assert not np.isnan(result['hopkins_statistic'])
 
-    def test_edge_cases(self):
-        """Test edge cases."""
-        analyzer = Clusterability()
+    def test_constant_data(self):
+        """Test with constant data (all same values)."""
+        analyzer = Clusterability(n_neighbors=5)
 
-        # Test with insufficient data
-        with pytest.raises(ValueError):
-            small_data = np.random.randn(5, 2)
-            analyzer.compute_hopkins_statistic(small_data)
+        # All data points are the same
+        constant_data = np.ones((20, 3))
+        hopkins = analyzer.compute_hopkins_statistic(constant_data)
+        assert np.isnan(hopkins)  # Should return nan when ranges are zero
 
-        # Test with empty window
-        empty_window = SlidingWindow(max_length=50, n_columns=2)
-        result = analyzer.compute_clusterability(empty_window)
-        assert np.isnan(result['hopkins_statistic'])
-        assert result['interpretation'] is None
+    def test_different_neighbors(self):
+        """Test with different n_neighbors values."""
+        for n_neighbors in [2, 5, 10]:
+            analyzer = Clusterability(n_neighbors=n_neighbors, random_state=42)
+            data = np.random.normal(0, 1, (50, 3))
+            hopkins = analyzer.compute_hopkins_statistic(data)
+            assert 0 <= hopkins <= 1  # Should be valid probability
 
 
 if __name__ == "__main__":

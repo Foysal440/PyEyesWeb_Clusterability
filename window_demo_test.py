@@ -9,68 +9,27 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Mock PyEyesWeb dependencies
 class SlidingWindow:
-    def __init__(self, max_length: int, n_columns: int):
-        self.max_length = max_length
+    def __init__(self, window_size: int, n_columns: int):
+        self.window_size = window_size
         self.n_columns = n_columns
         self._n_columns = n_columns
         self.buffer = []
 
-    def append(self, data_point):
+    def add(self, data_point):
         if len(data_point) != self.n_columns:
             raise ValueError(f"Expected {self.n_columns} columns, got {len(data_point)}")
         self.buffer.append(data_point)
-        if len(self.buffer) > self.max_length:
+        if len(self.buffer) > self.window_size:
             self.buffer.pop(0)
 
     def is_full(self):
-        return len(self.buffer) >= self.max_length
+        return len(self.buffer) >= self.window_size
 
     def to_array(self):
         return np.array(self.buffer), None
 
 
-class ThreadSafeHistoryBuffer:
-    def __init__(self, maxlen: int = 100):
-        self.buffer = []
-        self.maxlen = maxlen
-
-    def append(self, value):
-        self.buffer.append(value)
-        if len(self.buffer) > self.maxlen:
-            self.buffer.pop(0)
-
-    def get_all(self):  # ADD THIS METHOD
-        return self.buffer.copy()
-
-    def clear(self):
-        self.buffer.clear()
-
-
-def validate_integer(value, name, min_val=None, max_val=None):
-    if not isinstance(value, int):
-        raise TypeError(f"{name} must be integer")
-    if min_val is not None and value < min_val:
-        raise ValueError(f"{name} must be >= {min_val}")
-    if max_val is not None and value > max_val:
-        raise ValueError(f"{name} must be <= {max_val}")
-    return value
-
-def validate_boolean(value, name):
-    if not isinstance(value, bool):
-        raise TypeError(f"{name} must be boolean")
-    return value
-
-def validate_numeric(value, name, min_val=None, max_val=None):
-    if not isinstance(value, (int, float)):
-        raise TypeError(f"{name} must be numeric")
-    if min_val is not None and value < min_val:
-        raise ValueError(f"{name} must be >= {min_val}")
-    if max_val is not None and value > max_val:
-        raise ValueError(f"{name} must be <= {max_val}")
-    return float(value)
-
-
-from clusterability import Clusterability, assess_clusterability
+from clusterability import Clusterability
 
 
 def demo_window_analysis():
@@ -81,19 +40,14 @@ def demo_window_analysis():
     print("=" * 70)
 
     # Create analyzer
-    analyzer = Clusterability(
-        sensitivity=15,
-        output_interpretation=True,
-        sample_fraction=0.15,
-        random_state=42
-    )
+    analyzer = Clusterability(n_neighbors=5, random_state=42)
 
     # Test Scenario 1: Random Movement Data
     print("\n" + "=" * 50)
     print("SCENARIO 1: RANDOM MOVEMENT PATTERNS")
     print("=" * 50)
 
-    window1 = SlidingWindow(max_length=100, n_columns=3)  # 3D movement data
+    window1 = SlidingWindow(window_size=100, n_columns=3)  # 3D movement data
 
     print("Simulating random human movement (walking randomly)...")
     hopkins_values = []
@@ -102,29 +56,27 @@ def demo_window_analysis():
         x = np.random.normal(0, 2.0)
         y = np.random.normal(0, 1.5)
         z = np.random.normal(0, 0.8)
-        window1.append([x, y, z])
+        window1.add([x, y, z])
 
         if window1.is_full() and i % 20 == 0:
             result = analyzer(window1)
             if not np.isnan(result['hopkins_statistic']):
                 hopkins_values.append(result['hopkins_statistic'])
-                print(f"  Frame {i:3d}: Hopkins = {result['hopkins_statistic']:.3f} -> {result['interpretation']}")
+                print(f"  Frame {i:3d}: Hopkins = {result['hopkins_statistic']:.3f}")
 
     # Show summary for scenario 1
     if hopkins_values:
         avg_hopkins = np.mean(hopkins_values)
         print(f"\n  SUMMARY - Random Movement:")
         print(f"  Average Hopkins: {avg_hopkins:.3f}")
-        print(f"  Pattern: {analyzer.interpret_hopkins_statistic(avg_hopkins)}")
-
-    analyzer.reset_history()
+        print(f"  Expected: ~0.5 (random distribution)")
 
     # Test Scenario 2: Repetitive/Cyclic Movement
     print("\n" + "=" * 50)
     print("SCENARIO 2: REPETITIVE MOVEMENT PATTERNS")
     print("=" * 50)
 
-    window2 = SlidingWindow(max_length=100, n_columns=2)  # 2D cyclic motion
+    window2 = SlidingWindow(window_size=100, n_columns=2)  # 2D cyclic motion
 
     print("Simulating repetitive movement (walking in circles)...")
     hopkins_values = []
@@ -133,29 +85,27 @@ def demo_window_analysis():
         angle = i * 0.1
         x = 5 * np.cos(angle) + np.random.normal(0, 0.3)  # Circle with noise
         y = 5 * np.sin(angle) + np.random.normal(0, 0.3)
-        window2.append([x, y])
+        window2.add([x, y])
 
         if window2.is_full() and i % 20 == 0:
             result = analyzer(window2)
             if not np.isnan(result['hopkins_statistic']):
                 hopkins_values.append(result['hopkins_statistic'])
-                print(f"  Frame {i:3d}: Hopkins = {result['hopkins_statistic']:.3f} -> {result['interpretation']}")
+                print(f"  Frame {i:3d}: Hopkins = {result['hopkins_statistic']:.3f}")
 
     # Show summary for scenario 2
     if hopkins_values:
         avg_hopkins = np.mean(hopkins_values)
         print(f"\n  SUMMARY - Repetitive Movement:")
         print(f"  Average Hopkins: {avg_hopkins:.3f}")
-        print(f"  Pattern: {analyzer.interpret_hopkins_statistic(avg_hopkins)}")
-
-    analyzer.reset_history()
+        print(f"  Expected: >0.6 (clustered distribution)")
 
     # Test Scenario 3: Transition from Random to Clustered
     print("\n" + "=" * 50)
     print("SCENARIO 3: TRANSITION - RANDOM TO CLUSTERED MOVEMENT")
     print("=" * 50)
 
-    window3 = SlidingWindow(max_length=80, n_columns=2)
+    window3 = SlidingWindow(window_size=80, n_columns=2)
 
     print("Simulating movement transition (random walking -> focused activity)...")
     hopkins_values = []
@@ -176,13 +126,13 @@ def demo_window_analysis():
             y = np.random.normal(5, 0.5)
             phase = "CLUSTERED"
 
-        window3.append([x, y])
+        window3.add([x, y])
 
         if window3.is_full() and i % 15 == 0:
             result = analyzer(window3)
             if not np.isnan(result['hopkins_statistic']):
                 hopkins_values.append(result['hopkins_statistic'])
-                print(f"  Frame {i:3d} ({phase}): Hopkins = {result['hopkins_statistic']:.3f} -> {result['interpretation']}")
+                print(f"  Frame {i:3d} ({phase}): Hopkins = {result['hopkins_statistic']:.3f}")
 
     # Show summary for scenario 3
     if hopkins_values:
@@ -191,14 +141,13 @@ def demo_window_analysis():
         print(f"\n  SUMMARY - Transition Analysis:")
         print(f"  Average Hopkins: {avg_hopkins:.3f}")
         print(f"  Trend: {trend} (positive = increasing clusterability)")
-        print(f"  Final Pattern: {analyzer.interpret_hopkins_statistic(avg_hopkins)}")
 
     # Test Scenario 4: Multiple Movement Clusters
     print("\n" + "=" * 50)
     print("SCENARIO 4: MULTIPLE MOVEMENT CLUSTERS")
     print("=" * 50)
 
-    window4 = SlidingWindow(max_length=120, n_columns=3)
+    window4 = SlidingWindow(window_size=120, n_columns=3)
 
     print("Simulating multiple activity clusters (different movement types)...")
     hopkins_values = []
@@ -222,20 +171,38 @@ def demo_window_analysis():
             y = np.random.normal(-2, 1.5)
             z = np.random.normal(2, 0.8)
 
-        window4.append([x, y, z])
+        window4.add([x, y, z])
 
         if window4.is_full() and i % 25 == 0:
             result = analyzer(window4)
             if not np.isnan(result['hopkins_statistic']):
                 hopkins_values.append(result['hopkins_statistic'])
-                print(f"  Frame {i:3d}: Hopkins = {result['hopkins_statistic']:.3f} -> {result['interpretation']}")
+                print(f"  Frame {i:3d}: Hopkins = {result['hopkins_statistic']:.3f}")
 
     # Show summary for scenario 4
     if hopkins_values:
         avg_hopkins = np.mean(hopkins_values)
         print(f"\n  SUMMARY - Multiple Clusters:")
         print(f"  Average Hopkins: {avg_hopkins:.3f}")
-        print(f"  Pattern: {analyzer.interpret_hopkins_statistic(avg_hopkins)}")
+        print(f"  Expected: >0.7 (strong clustering)")
+
+    # Test Scenario 5: Small Sample Sizes
+    print("\n" + "=" * 50)
+    print("SCENARIO 5: SMALL SAMPLE SIZES")
+    print("=" * 50)
+
+    window5 = SlidingWindow(window_size=10, n_columns=2)
+
+    print("Testing with small window size (10 samples)...")
+    for i in range(15):
+        x = np.random.normal(0, 1.0)
+        y = np.random.normal(0, 1.0)
+        window5.add([x, y])
+
+        if window5.is_full():
+            result = analyzer(window5)
+            print(f"  Frame {i:3d}: Hopkins = {result['hopkins_statistic']:.3f}, Samples = {result['sample_size']}")
+            break
 
     # Final comprehensive analysis
     print("\n" + "=" * 70)
@@ -256,7 +223,9 @@ def demo_window_analysis():
     print("• Increasing trend: Movement becoming more structured/purposeful")
     print("• Decreasing trend: Movement becoming more random/exploratory")
 
-    print("\n DEMO COMPLETED SUCCESSFULLY! ")
+    print("\n" + "=" * 70)
+    print("DEMO COMPLETED SUCCESSFULLY!")
+    print("=" * 70)
 
 
 if __name__ == "__main__":
